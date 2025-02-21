@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.id }}
+      upload_url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get version from Cargo.toml
+        id: get-version
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      - name: Create Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.get-version.outputs.version }}
+          release_name: Release v${{ steps.get-version.outputs.version }}
+          draft: false
+          prerelease: false
+
+  build-release:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux
+            binary_path: target/release/ask-ai
+            asset_name: ask-ai-linux-amd64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows
+            binary_path: target/release/ask-ai.exe
+            asset_name: ask-ai-windows-amd64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macos-intel
+            binary_path: target/release/ask-ai
+            asset_name: ask-ai-macos-intel
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macos-apple
+            binary_path: target/release/ask-ai
+            asset_name: ask-ai-macos-apple
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --target ${{ matrix.target }}
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ${{ matrix.binary_path }}
+          asset_name: ${{ matrix.asset_name }}
+          asset_content_type: application/octet-stream
