@@ -2,83 +2,85 @@
 
 # 🤖 Ask AI
 
-_让 AI 帮你生成最适合的 Shell 命令_
+_AI-powered Shell Command Generator_
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/blushyes/ask-ai)
 
+[English](README.md) | [中文](README_zh.md)
+
 </div>
 
-## ✨ 功能特点
+## ✨ Features
 
-- 🧠 基于 AI 的智能命令生成
-- 🛡️ 内置危险命令检测
-- 🎨 美观的命令行界面
-- 🔍 支持调试模式
-- 📝 详细的命令执行结果
-- 🚀 支持 dry-run 模式
+- 🧠 AI-powered intelligent command generation
+- 🛡️ Built-in dangerous command detection
+- 🎨 Beautiful command-line interface
+- 🔍 Debug mode support
+- 📝 Detailed command execution results
+- 🚀 Dry-run mode support
 
-## 📦 安装
+## 📦 Installation
 
-确保你的系统已安装 Rust 工具链，然后执行：
+Ensure you have the Rust toolchain installed, then run:
 
 ```bash
 cargo install --path .
 ```
 
-## 🔧 环境配置
+## 🔧 Configuration
 
-在使用之前，需要设置以下环境变量：
+Before using, set the following environment variables:
 
 ```bash
-OPENAI_BASE_URL=你的OpenAI API地址
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_MODEL=你要使用的模型名称（如：gpt-3.5-turbo）
+OPENAI_BASE_URL=Your OpenAI API URL
+OPENAI_API_KEY=Your OpenAI API Key
+OPENAI_MODEL=Model name you want to use (e.g., gpt-3.5-turbo)
 ```
 
-你可以创建一个`.env`文件来存储这些配置。
+You can create a `.env` file to store these configurations.
 
-## 🚀 使用方法
+## 🚀 Usage
 
 ```bash
-# 基本使用
-ask "查看当前目录下的所有文件"
+# Basic usage
+ask "list all files in current directory"
 
-# 只显示命令而不执行（dry-run模式）
-ask --dry-run "查看系统内存使用情况"
+# Show command without execution (dry-run mode)
+ask --dry-run "check system memory usage"
 
-# 显示调试信息
-ask -D "列出所有正在运行的进程"
+# Show debug information
+ask -D "list all running processes"
 
-# 不显示详细输出
+# Hide detailed output
 ask -v false "ping baidu.com"
 ```
 
-## 📚 命令行参数
+## 📚 Command Line Arguments
 
-| 参数            | 描述               | 默认值 |
-| --------------- | ------------------ | ------ |
-| `<PROMPT>`      | 你想执行的操作描述 | 必填   |
-| `-d, --dry-run` | 只显示命令而不执行 | false  |
-| `-v, --verbose` | 显示详细输出       | true   |
-| `-D, --debug`   | 显示调试信息       | false  |
+| Parameter       | Description                          | Default |
+| -------------- | ------------------------------------ | ------- |
+| `<PROMPT>`     | Description of what you want to do   | Required|
+| `-d, --dry-run`| Show command without execution       | false   |
+| `-v, --verbose`| Show detailed output                 | true    |
+| `-D, --debug`  | Show debug information               | false   |
 
-## 🛡️ 安全特性
+## 🛡️ Security Features
 
-为了保护系统安全，程序会自动检测并拒绝执行以下危险命令：
+To protect system security, the program automatically detects and refuses to execute dangerous commands such as:
 
 - `rm -rf`
 - `mkfs`
 - `dd`
 - `> /dev/`
 - `chmod -R`
-- 以及其他潜在的危险操作
+- And other potentially dangerous operations
 
-## 🤝 贡献
+## 🤝 Contributing
 
-欢迎提交 Issue 和 Pull Request！
+Issues and Pull Requests are welcome!
 
-## 📄 开源协议
+## 📄 License
 
-本项目采用 MIT 协议开源，详见[LICENSE](LICENSE)文件。
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
