@@ -31,15 +31,29 @@ cargo install --path .
 
 ## 🔧 Configuration
 
-Before using, set the following environment variables:
+On first run, the program will guide you through the configuration process. The configuration file will be saved in `.askai/config.toml` in your home directory.
+
+You can also manually set the configuration via command line:
 
 ```bash
-OPENAI_BASE_URL=Your OpenAI API URL
-OPENAI_API_KEY=Your OpenAI API Key
-OPENAI_MODEL=Model name you want to use (e.g., gpt-3.5-turbo)
+# Set API base URL
+ask set config base_url=https://api.openai.com/v1
+
+# Set API key
+ask set config api_key=your_api_key
+
+# Set model name
+ask set config model=gpt-3.5-turbo
 ```
 
-You can create a `.env` file to store these configurations.
+The configuration file format is as follows:
+
+```toml
+[api]
+base_url = "Your OpenAI API URL"
+api_key = "Your OpenAI API Key"
+model = "Model name you want to use (e.g., gpt-3.5-turbo)"
+```
 
 ## 🚀 Usage
 

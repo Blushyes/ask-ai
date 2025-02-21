@@ -27,17 +27,31 @@ _让 AI 帮你生成最适合的 Shell 命令_
 cargo install --path .
 ```
 
-## 🔧 环境配置
+## 🔧 配置
 
-在使用之前，需要设置以下环境变量：
+首次运行时，程序会自动引导你完成配置。配置文件将保存在用户主目录的 `.askai/config.toml` 中。
+
+你也可以通过命令行手动设置配置：
 
 ```bash
-OPENAI_BASE_URL=你的OpenAI API地址
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_MODEL=你要使用的模型名称（如：gpt-3.5-turbo）
+# 设置API基础URL
+ask set config base_url=https://api.openai.com/v1
+
+# 设置API密钥
+ask set config api_key=your_api_key
+
+# 设置模型名称
+ask set config model=gpt-3.5-turbo
 ```
 
-你可以创建一个`.env`文件来存储这些配置。
+配置文件格式如下：
+
+```toml
+[api]
+base_url = "你的OpenAI API地址"
+api_key = "你的OpenAI API密钥"
+model = "你要使用的模型名称（如：gpt-3.5-turbo）"
+```
 
 ## 🚀 使用方法
 
