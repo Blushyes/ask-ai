@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   create-release:
@@ -10,14 +10,30 @@ jobs:
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
       upload_url: ${{ steps.create-release.outputs.upload_url }}
+      should_release: ${{ steps.check-tag.outputs.tag_exists != 'true' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Get version from Cargo.toml
         id: get-version
         run: |
           VERSION=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          TAG="v${{ steps.get-version.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+            echo "::notice::Tag $TAG already exists, skipping release creation"
+            exit 0
+          else
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+          fi
       - name: Create Release
+        if: steps.check-tag.outputs.tag_exists != 'true'
         id: create-release
         uses: actions/create-release@v1
         env:
@@ -30,34 +46,35 @@ jobs:
 
   build-release:
     needs: create-release
+    if: needs.create-release.outputs.should_release == 'true'
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             name: linux
-            binary_path: target/release/ask-ai
+            binary_path: target/x86_64-unknown-linux-gnu/release/ask
             asset_name: ask-ai-linux-amd64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             name: windows
-            binary_path: target/release/ask-ai.exe
+            binary_path: target/x86_64-pc-windows-msvc/release/ask.exe
             asset_name: ask-ai-windows-amd64.exe
           - os: macos-latest
             target: x86_64-apple-darwin
             name: macos-intel
-            binary_path: target/release/ask-ai
+            binary_path: target/x86_64-apple-darwin/release/ask
             asset_name: ask-ai-macos-intel
           - os: macos-latest
             target: aarch64-apple-darwin
             name: macos-apple
-            binary_path: target/release/ask-ai
+            binary_path: target/aarch64-apple-darwin/release/ask
             asset_name: ask-ai-macos-apple
 
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
