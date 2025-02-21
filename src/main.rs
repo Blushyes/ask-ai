@@ -9,6 +9,14 @@ use serde_json::{json, Value};
 use std::env;
 use std::process::Command;
 
+#[derive(Debug)]
+struct ExecutionHistory {
+    command: String,
+    output: String,
+    success: bool,
+    attempt: u32,
+}
+
 #[derive(Parser)]
 #[command(author, version, about = "AI驱动的shell命令助手")]
 struct Cli {
@@ -58,13 +66,23 @@ fn get_system_info() -> String {
         os, shell, term, user, pwd)
 }
 
-const PROMPT: &str = r#"你是一个Shell命令专家，请根据用户的需求生成对应的shell命令。
+const PROMPT: &str = r#"你是一个Shell命令专家，请根据用户的需求和历史执行结果生成或优化shell命令。
 
 要求：
-- 只需要输出可执行的shell命令，不需要任何解释
-- 生成的命令应该尽可能通用和全面，确保能够显示完整的信息。只返回命令本身，不要有其他解释。对于网络相关的查询，优先使用 lsof 或 netstat 等更通用的命令。
-- 不要使用代码块标记（```）或其他格式标记
-- 如果用户需要写代码，或者实现什么shell做不到的功能，可以类似如下方式用python写脚本写入py文件后执行py文件（假设用户安装了python环境）：
+- 如果是首次执行（没有历史记录）：
+  - 生成一个可执行的shell命令
+  - 命令应该尽可能通用和全面，优先使用终端自带的非第三方语句
+  - 确保命令的所有参数都是正确且存在的
+  - 不要使用代码块标记或其他格式标记
+
+- 如果有历史执行记录：
+  - 分析上一次命令的执行结果
+  - 判断是否达到了预期目标
+  - 如果未达到目标，分析可能的原因并生成改进的命令
+  - 在响应中包含分析结果和改进建议
+
+- 如果需要写代码或实现shell无法直接完成的功能：
+  - 可以使用python脚本方式，例如：
 cat << 'EOF' > hello.py
 print("Hello, World!")
 # ...
@@ -77,7 +95,11 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 python hello.py
-- 一个命令能完成用户的需求，不要拆分成多步
+
+- 终止条件：
+  - 命令执行成功且达到预期目标
+  - 连续失败次数超过限制
+  - 用户手动终止
 "#;
 
 fn is_dangerous_command(command: &str) -> bool {
@@ -95,7 +117,11 @@ fn clean_command_output(command: &str) -> String {
     }
 }
 
-async fn get_ai_response(prompt: &str, debug: bool) -> Result<String> {
+async fn get_ai_response(
+    prompt: &str,
+    history: Option<&ExecutionHistory>,
+    debug: bool,
+) -> Result<String> {
     let client = Client::new();
     let base_url = env::var("OPENAI_BASE_URL").context("OPENAI_BASE_URL not set")?;
     let api_key = env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
@@ -103,10 +129,16 @@ async fn get_ai_response(prompt: &str, debug: bool) -> Result<String> {
 
     let system_info = get_system_info();
     let full_prompt = format!("{}\n{}", PROMPT, system_info);
-    let user_prompt = format!(
-        "现在，用户的问题为：{}，请你根据用户的问题生成对应的shell命令来实现用户的需求。",
-        prompt
-    );
+    let user_prompt = match history {
+        Some(h) => format!(
+            "用户的问题为：{}\n上一次执行的命令是：{}\n执行结果是：{}\n执行是否成功：{}\n这是第{}次尝试。\n请根据上述信息分析执行结果，判断是否达到预期目标，如果没有达到目标，分析原因并生成改进的命令。",
+            prompt, h.command, h.output, h.success, h.attempt
+        ),
+        None => format!(
+            "现在，用户的问题为：{}，请你根据用户的问题生成对应的shell命令来实现用户的需求。",
+            prompt
+        ),
+    };
 
     if debug {
         println!("{}", style("🔍 调试信息：").blue().bold());
@@ -150,55 +182,96 @@ async fn main() -> Result<()> {
     dotenv().ok();
     let cli = Cli::parse();
     let term = Term::stdout();
+    let mut history: Option<ExecutionHistory> = None;
+    let max_attempts = 3;
 
-    term.write_line(&format!("{}", style("🤔 正在思考中...").blue()))?;
-    let command = get_ai_response(&cli.prompt, cli.debug).await?;
+    let mut attempt = 1;
+    while attempt <= max_attempts {
+        term.write_line(&format!("{}", style("🤔 正在思考中...").blue()))?;
+        let command = get_ai_response(&cli.prompt, history.as_ref(), cli.debug).await?;
 
-    term.write_line("")?;
-    term.write_line(&format!("{}", style("📝 生成的命令：").blue().bold()))?;
-    term.write_line(&format!("{}", style(&command).cyan()))?;
-    term.write_line("")?;
+        term.write_line("")?;
+        term.write_line(&format!("{}", style("📝 生成的命令：").blue().bold()))?;
+        term.write_line(&format!("{}", style(&command).cyan()))?;
+        term.write_line("")?;
 
-    if is_dangerous_command(&command) {
-        term.write_line(&format!(
-            "{}",
-            style("⚠️  警告：检测到潜在的危险命令，拒绝执行！")
-                .red()
-                .bold()
-        ))?;
-        return Ok(());
-    }
+        if is_dangerous_command(&command) {
+            term.write_line(&format!(
+                "{}",
+                style("⚠️  警告：检测到潜在的危险命令，拒绝执行！")
+                    .red()
+                    .bold()
+            ))?;
+            return Ok(());
+        }
 
-    if !cli.dry_run {
-        if Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("是否要执行这个命令？")
-            .default(false)
-            .interact()?
-        {
-            term.write_line("")?;
-            term.write_line(&format!("{}", style("🚀 正在执行命令...").yellow()))?;
+        if !cli.dry_run {
+            if Confirm::with_theme(&ColorfulTheme::default())
+                .with_prompt("是否要执行这个命令？")
+                .default(false)
+                .interact()?
+            {
+                term.write_line("")?;
+                term.write_line(&format!("{}", style("🚀 正在执行命令...").yellow()))?;
 
-            let output = Command::new("sh")
-                .arg("-c")
-                .arg(&command)
-                .output()
-                .context("Failed to execute command")?;
+                let output = Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .output()
+                    .context("Failed to execute command")?;
 
-            if output.status.success() {
-                term.write_line(&format!("{}", style("✅ 命令执行成功！").green().bold()))?;
-                if cli.verbose && !output.stdout.is_empty() {
-                    term.write_line("")?;
-                    term.write_line(&String::from_utf8_lossy(&output.stdout))?;
+                let success = output.status.success();
+                let output_text = if success {
+                    String::from_utf8_lossy(&output.stdout).to_string()
+                } else {
+                    String::from_utf8_lossy(&output.stderr).to_string()
+                };
+
+                if success {
+                    term.write_line(&format!("{}", style("✅ 命令执行成功！").green().bold()))?;
+                    if cli.verbose && !output_text.is_empty() {
+                        term.write_line("")?;
+                        term.write_line(&output_text)?;
+                    }
+                } else {
+                    term.write_line(&format!(
+                        "{} {}",
+                        style("❌ 命令执行失败：").red().bold(),
+                        style(&output_text).red()
+                    ))?;
+                }
+
+                history = Some(ExecutionHistory {
+                    command: command.clone(),
+                    output: output_text,
+                    success,
+                    attempt,
+                });
+
+                if success {
+                    if Confirm::with_theme(&ColorfulTheme::default())
+                        .with_prompt("命令是否达到了预期目标？")
+                        .default(true)
+                        .interact()?
+                    {
+                        break;
+                    }
                 }
             } else {
-                let error = String::from_utf8_lossy(&output.stderr);
-                term.write_line(&format!(
-                    "{} {}",
-                    style("❌ 命令执行失败：").red().bold(),
-                    style(&error).red()
-                ))?;
+                break;
             }
+        } else {
+            break;
         }
+
+        attempt += 1;
+        if attempt > max_attempts {
+            term.write_line(&format!(
+                "{}",
+                style("⚠️  已达到最大尝试次数，程序终止。").yellow().bold()
+            ))?;
+        }
+        term.write_line("")?;
     }
 
     Ok(())
