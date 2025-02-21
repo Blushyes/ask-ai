@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use console::{style, Term};
 use dialoguer::{theme::ColorfulTheme, Confirm};
-use dotenv::dotenv;
 use regex::Regex;
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::env;
 use std::process::Command;
+use std::{env, fs};
+use toml;
 
 #[derive(Debug)]
 struct ExecutionHistory {
@@ -20,9 +20,12 @@ struct ExecutionHistory {
 #[derive(Parser)]
 #[command(author, version, about = "AI驱动的shell命令助手")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// 你想执行的操作描述
     #[arg(index = 1)]
-    prompt: String,
+    prompt: Option<String>,
 
     /// 只显示命令而不执行
     #[arg(short, long)]
@@ -35,6 +38,21 @@ struct Cli {
     /// 显示调试信息
     #[arg(short = 'D', long)]
     debug: bool,
+}
+
+#[derive(Parser)]
+enum Commands {
+    /// 设置配置项
+    #[command(name = "set")]
+    Set {
+        /// 配置类型 (config)
+        #[arg(index = 1)]
+        config_type: String,
+
+        /// 配置项 (key=value)
+        #[arg(index = 2)]
+        config_value: String,
+    },
 }
 
 const DANGEROUS_COMMANDS: [&str; 6] = [
@@ -71,9 +89,6 @@ const PROMPT: &str = r#"你是一个Shell命令专家，请根据用户的需求
 要求：
 - 如果是首次执行（没有历史记录）：
   - 生成一个可执行的shell命令
-  - 命令应该尽可能通用和全面，优先使用终端自带的非第三方语句
-  - 确保命令的所有参数都是正确且存在的
-  - 不要使用代码块标记或其他格式标记
 
 - 如果有历史执行记录：
   - 分析上一次命令的执行结果
@@ -96,6 +111,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 python hello.py
 
+- 不管什么时候，你必须遵守的：
+  - 命令应该尽可能通用和全面，优先使用终端自带的非第三方语句
+  - 确保命令的所有参数都是正确且存在的
+  - 不要使用代码块标记或其他格式标记
+
 - 终止条件：
   - 命令执行成功且达到预期目标
   - 连续失败次数超过限制
@@ -117,15 +137,121 @@ fn clean_command_output(command: &str) -> String {
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Config {
+    api: ApiConfig,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ApiConfig {
+    base_url: String,
+    api_key: String,
+    model: String,
+}
+
+fn get_config_dir() -> Result<std::path::PathBuf> {
+    let home = dirs::home_dir().context("无法获取用户主目录")?;
+    let config_dir = home.join(".askai");
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir).context("无法创建配置目录")?;
+    }
+    Ok(config_dir)
+}
+
+fn get_config_path() -> Result<std::path::PathBuf> {
+    Ok(get_config_dir()?.join("config.toml"))
+}
+
+fn load_config() -> Result<Config> {
+    let config_path = get_config_path()?;
+    if !config_path.exists() {
+        println!("{}", style("⚙️  首次运行需要进行配置").blue().bold());
+        println!();
+
+        let base_url = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
+            .with_prompt("请输入API基础URL")
+            .default(String::from("https://api.openai.com/v1"))
+            .interact()?;
+
+        let api_key = dialoguer::Password::with_theme(&ColorfulTheme::default())
+            .with_prompt("请输入API密钥")
+            .interact()?;
+
+        let model = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
+            .with_prompt("请输入模型名称")
+            .default(String::from("gpt-3.5-turbo"))
+            .interact()?;
+
+        let config = Config {
+            api: ApiConfig {
+                base_url,
+                api_key,
+                model,
+            },
+        };
+
+        save_config(&config)?;
+        println!("{}", style("✅ 配置已保存").green().bold());
+        return Ok(config);
+    }
+    let config_str = fs::read_to_string(&config_path).context("无法读取配置文件")?;
+    let config: Config = toml::from_str(&config_str).context("无法解析配置文件")?;
+    Ok(config)
+}
+
+fn save_config(config: &Config) -> Result<()> {
+    let config_path = get_config_path()?;
+    let config_str = toml::to_string_pretty(config).context("无法序列化配置")?;
+    fs::write(&config_path, config_str).context("无法保存配置文件")?;
+    Ok(())
+}
+
+fn set_config(config_type: &str, config_value: &str) -> Result<()> {
+    let mut config = if let Ok(existing_config) = load_config() {
+        existing_config
+    } else {
+        Config {
+            api: ApiConfig {
+                base_url: String::from("https://api.openai.com/v1"),
+                api_key: String::new(),
+                model: String::from("gpt-3.5-turbo"),
+            },
+        }
+    };
+
+    let parts: Vec<&str> = config_value.split('=').collect();
+    if parts.len() != 2 {
+        return Err(anyhow::anyhow!("配置格式错误，应为 key=value"));
+    }
+
+    let key = parts[0];
+    let value = parts[1];
+
+    match config_type {
+        "config" => match key {
+            "base_url" => config.api.base_url = value.to_string(),
+            "api_key" => config.api.api_key = value.to_string(),
+            "model" => config.api.model = value.to_string(),
+            _ => return Err(anyhow::anyhow!("未知的配置项: {}", key)),
+        },
+        _ => return Err(anyhow::anyhow!("未知的配置类型: {}", config_type)),
+    }
+
+    save_config(&config)?;
+    println!("配置已更新");
+    Ok(())
+}
+
 async fn get_ai_response(
     prompt: &str,
     history: Option<&ExecutionHistory>,
     debug: bool,
 ) -> Result<String> {
     let client = Client::new();
-    let base_url = env::var("OPENAI_BASE_URL").context("OPENAI_BASE_URL not set")?;
-    let api_key = env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
-    let model = env::var("OPENAI_MODEL").context("OPENAI_MODEL not set")?;
+    let config = load_config()?;
+    let base_url = &config.api.base_url;
+    let api_key = &config.api.api_key;
+    let model = &config.api.model;
 
     let system_info = get_system_info();
     let full_prompt = format!("{}\n{}", PROMPT, system_info);
@@ -179,8 +305,13 @@ async fn get_ai_response(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv().ok();
     let cli = Cli::parse();
+
+    if let Some(Commands::Set { config_type, config_value }) = cli.command {
+        return set_config(&config_type, &config_value);
+    }
+
+    let prompt = cli.prompt.ok_or_else(|| anyhow::anyhow!("请提供操作描述"))?;
     let term = Term::stdout();
     let mut history: Option<ExecutionHistory> = None;
     let max_attempts = 3;
@@ -188,7 +319,7 @@ async fn main() -> Result<()> {
     let mut attempt = 1;
     while attempt <= max_attempts {
         term.write_line(&format!("{}", style("🤔 正在思考中...").blue()))?;
-        let command = get_ai_response(&cli.prompt, history.as_ref(), cli.debug).await?;
+        let command = get_ai_response(prompt.as_str(), history.as_ref(), cli.debug).await?;
 
         term.write_line("")?;
         term.write_line(&format!("{}", style("📝 生成的命令：").blue().bold()))?;
