@@ -345,6 +345,13 @@ async fn main() -> Result<()> {
                 term.write_line("")?;
                 term.write_line(&format!("{}", style("🚀 正在执行命令...").yellow()))?;
 
+                #[cfg(target_os = "windows")]
+                let output = Command::new("cmd")
+                    .args(["/C", &command])
+                    .output()
+                    .context("Failed to execute command")?;
+
+                #[cfg(not(target_os = "windows"))]
                 let output = Command::new("sh")
                     .arg("-c")
                     .arg(&command)
