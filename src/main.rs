@@ -84,7 +84,47 @@ fn get_system_info() -> String {
         os, shell, term, user, pwd)
 }
 
-const PROMPT: &str = r#"你是一个Shell命令专家，请根据用户的需求和历史执行结果生成或优化shell命令。
+// English version of the prompt
+const PROMPT_EN: &str = r#"You are a Shell command expert. Please generate or optimize shell commands based on user needs and execution history.
+
+Requirements:
+- For first execution (no history):
+  - Generate an executable shell command
+
+- If there's execution history:
+  - Analyze the previous command's execution result
+  - Determine if the expected goal was achieved
+  - If the goal wasn't achieved, analyze possible reasons and generate an improved command
+  - Include analysis results and improvement suggestions in your response
+
+- If you need to write code or implement functionality that shell can't directly accomplish:
+  - You can use Python scripts, for example:
+cat << 'EOF' > hello.py
+print("Hello, World!")
+# ...
+EOF
+cat << 'EOF' > requirements.txt
+# List all packages and versions
+...
+EOF
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python hello.py
+
+- Always follow these rules:
+  - Commands should be as generic and comprehensive as possible, prioritizing built-in terminal commands over third-party ones
+  - Ensure all command parameters are correct and exist
+  - Don't use code block markers or other formatting markers
+
+- Termination conditions:
+  - Command executes successfully and achieves the expected goal
+  - Number of consecutive failures exceeds the limit
+  - User manually terminates
+"#;
+
+// Chinese version of the prompt
+const PROMPT_ZH: &str = r#"你是一个Shell命令专家，请根据用户的需求和历史执行结果生成或优化shell命令。
 
 要求：
 - 如果是首次执行（没有历史记录）：
@@ -122,6 +162,81 @@ python hello.py
   - 用户手动终止
 "#;
 
+// UI text translations
+struct UiText {
+    thinking: &'static str,
+    generated_command: &'static str,
+    dangerous_command_warning: &'static str,
+    execute_command_prompt: &'static str,
+    executing_command: &'static str,
+    command_success: &'static str,
+    command_failure: &'static str,
+    goal_achieved_prompt: &'static str,
+    max_attempts_reached: &'static str,
+    first_run_config: &'static str,
+    config_saved: &'static str,
+    base_url_prompt: &'static str,
+    api_key_prompt: &'static str,
+    model_prompt: &'static str,
+    language_prompt: &'static str,
+    provide_description: &'static str,
+    config_updated: &'static str,
+}
+
+const UI_TEXT_EN: UiText = UiText {
+    thinking: "🤔 Thinking...",
+    generated_command: "📝 Generated command:",
+    dangerous_command_warning: "⚠️  Warning: Potentially dangerous command detected, execution refused!",
+    execute_command_prompt: "Do you want to execute this command?",
+    executing_command: "🚀 Executing command...",
+    command_success: "✅ Command executed successfully!",
+    command_failure: "❌ Command execution failed:",
+    goal_achieved_prompt: "Did the command achieve the expected goal?",
+    max_attempts_reached: "⚠️  Maximum number of attempts reached, program terminated.",
+    first_run_config: "⚙️  First run requires configuration",
+    config_saved: "✅ Configuration saved",
+    base_url_prompt: "Enter API base URL",
+    api_key_prompt: "Enter API key",
+    model_prompt: "Enter model name",
+    language_prompt: "Enter language (en/zh)",
+    provide_description: "Please provide an operation description",
+    config_updated: "Configuration updated",
+};
+
+const UI_TEXT_ZH: UiText = UiText {
+    thinking: "🤔 正在思考中...",
+    generated_command: "📝 生成的命令：",
+    dangerous_command_warning: "⚠️  警告：检测到潜在的危险命令，拒绝执行！",
+    execute_command_prompt: "是否要执行这个命令？",
+    executing_command: "🚀 正在执行命令...",
+    command_success: "✅ 命令执行成功！",
+    command_failure: "❌ 命令执行失败：",
+    goal_achieved_prompt: "命令是否达到了预期目标？",
+    max_attempts_reached: "⚠️  已达到最大尝试次数，程序终止。",
+    first_run_config: "⚙️  首次运行需要进行配置",
+    config_saved: "✅ 配置已保存",
+    base_url_prompt: "请输入API基础URL",
+    api_key_prompt: "请输入API密钥",
+    model_prompt: "请输入模型名称",
+    language_prompt: "请输入语言 (en/zh)",
+    provide_description: "请提供操作描述",
+    config_updated: "配置已更新",
+};
+
+fn get_ui_text(language: &str) -> &'static UiText {
+    match language {
+        "en" => &UI_TEXT_EN,
+        _ => &UI_TEXT_ZH,
+    }
+}
+
+fn get_prompt(language: &str) -> &'static str {
+    match language {
+        "en" => PROMPT_EN,
+        _ => PROMPT_ZH,
+    }
+}
+
 fn is_dangerous_command(command: &str) -> bool {
     DANGEROUS_COMMANDS
         .iter()
@@ -140,6 +255,7 @@ fn clean_command_output(command: &str) -> String {
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Config {
     api: ApiConfig,
+    language: String,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -149,11 +265,26 @@ struct ApiConfig {
     model: String,
 }
 
+fn get_system_language() -> String {
+    // Try to get system language from environment variables
+    let lang = env::var("LANG")
+        .or_else(|_| env::var("LC_ALL"))
+        .or_else(|_| env::var("LANGUAGE"))
+        .unwrap_or_else(|_| String::from("en_US.UTF-8"));
+    
+    // Extract language code from format like "en_US.UTF-8"
+    if lang.starts_with("zh") {
+        "zh".to_string()
+    } else {
+        "en".to_string()
+    }
+}
+
 fn get_config_dir() -> Result<std::path::PathBuf> {
-    let home = dirs::home_dir().context("无法获取用户主目录")?;
+    let home = dirs::home_dir().context("Unable to get home directory")?;
     let config_dir = home.join(".askai");
     if !config_dir.exists() {
-        fs::create_dir_all(&config_dir).context("无法创建配置目录")?;
+        fs::create_dir_all(&config_dir).context("Unable to create config directory")?;
     }
     Ok(config_dir)
 }
@@ -165,21 +296,31 @@ fn get_config_path() -> Result<std::path::PathBuf> {
 fn load_config() -> Result<Config> {
     let config_path = get_config_path()?;
     if !config_path.exists() {
-        println!("{}", style("⚙️  首次运行需要进行配置").blue().bold());
+        // Get system language as default
+        let default_language = get_system_language();
+        // Get UI text based on system language
+        let ui_text = get_ui_text(&default_language);
+        
+        println!("{}", style(ui_text.first_run_config).blue().bold());
         println!();
 
         let base_url = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
-            .with_prompt("请输入API基础URL")
+            .with_prompt(ui_text.base_url_prompt)
             .default(String::from("https://api.openai.com/v1"))
             .interact()?;
 
         let api_key = dialoguer::Password::with_theme(&ColorfulTheme::default())
-            .with_prompt("请输入API密钥")
+            .with_prompt(ui_text.api_key_prompt)
             .interact()?;
 
         let model = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
-            .with_prompt("请输入模型名称")
+            .with_prompt(ui_text.model_prompt)
             .default(String::from("gpt-3.5-turbo"))
+            .interact()?;
+            
+        let language = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
+            .with_prompt(ui_text.language_prompt)
+            .default(default_language)
             .interact()?;
 
         let config = Config {
@@ -188,21 +329,57 @@ fn load_config() -> Result<Config> {
                 api_key,
                 model,
             },
+            language,
         };
 
         save_config(&config)?;
-        println!("{}", style("✅ 配置已保存").green().bold());
+        println!("{}", style(ui_text.config_saved).green().bold());
         return Ok(config);
     }
-    let config_str = fs::read_to_string(&config_path).context("无法读取配置文件")?;
-    let config: Config = toml::from_str(&config_str).context("无法解析配置文件")?;
-    Ok(config)
+    let config_str = fs::read_to_string(&config_path).context("Unable to read config file")?;
+    
+    // 尝试解析配置文件，如果失败可能是旧版本配置缺少language字段
+    match toml::from_str::<Config>(&config_str) {
+        Ok(config) => Ok(config),
+        Err(_) => {
+            // 尝试解析为不包含language字段的旧版本配置
+            #[derive(serde::Deserialize)]
+            struct OldConfig {
+                api: ApiConfig,
+            }
+            
+            let old_config: OldConfig = toml::from_str(&config_str).context("Unable to parse config file")?;
+            
+            // 获取系统默认语言
+            let default_language = get_system_language();
+            // 获取对应语言的UI文本
+            let ui_text = get_ui_text(&default_language);
+            
+            // 提示用户选择语言
+            println!("{}", style("需要设置语言偏好").blue().bold());
+            let language = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
+                .with_prompt(ui_text.language_prompt)
+                .default(default_language)
+                .interact()?;
+            
+            // 创建新的配置并保存
+            let config = Config {
+                api: old_config.api,
+                language,
+            };
+            
+            save_config(&config)?;
+            println!("{}", style(ui_text.config_saved).green().bold());
+            
+            Ok(config)
+        }
+    }
 }
 
 fn save_config(config: &Config) -> Result<()> {
     let config_path = get_config_path()?;
-    let config_str = toml::to_string_pretty(config).context("无法序列化配置")?;
-    fs::write(&config_path, config_str).context("无法保存配置文件")?;
+    let config_str = toml::to_string_pretty(config).context("Unable to serialize config")?;
+    fs::write(&config_path, config_str).context("Unable to save config file")?;
     Ok(())
 }
 
@@ -216,6 +393,7 @@ fn set_config(config_type: &str, config_value: &str) -> Result<()> {
                 api_key: String::new(),
                 model: String::from("gpt-3.5-turbo"),
             },
+            language: String::from("en"),
         }
     };
 
@@ -232,13 +410,14 @@ fn set_config(config_type: &str, config_value: &str) -> Result<()> {
             "base_url" => config.api.base_url = value.to_string(),
             "api_key" => config.api.api_key = value.to_string(),
             "model" => config.api.model = value.to_string(),
+            "language" => config.language = value.to_string(),
             _ => return Err(anyhow::anyhow!("未知的配置项: {}", key)),
         },
         _ => return Err(anyhow::anyhow!("未知的配置类型: {}", config_type)),
     }
 
     save_config(&config)?;
-    println!("配置已更新");
+    println!("{}", style("Configuration updated").green().bold());
     Ok(())
 }
 
@@ -254,10 +433,16 @@ async fn get_ai_response(
     let model = &config.api.model;
 
     let system_info = get_system_info();
-    let full_prompt = format!("{}\n{}", PROMPT, system_info);
+    let full_prompt = format!("{}
+{}", get_prompt(&config.language), system_info);
     let user_prompt = match history {
         Some(h) => format!(
-            "用户的问题为：{}\n上一次执行的命令是：{}\n执行结果是：{}\n执行是否成功：{}\n这是第{}次尝试。\n请根据上述信息分析执行结果，判断是否达到预期目标，如果没有达到目标，分析原因并生成改进的命令。",
+            "用户的问题为：{}
+上一次执行的命令是：{}
+执行结果是：{}
+执行是否成功：{}
+这是第{}次尝试。
+请根据上述信息分析执行结果，判断是否达到预期目标，如果没有达到目标，分析原因并生成改进的命令。",
             prompt, h.command, h.output, h.success, h.attempt
         ),
         None => format!(
@@ -315,21 +500,23 @@ async fn main() -> Result<()> {
     let term = Term::stdout();
     let mut history: Option<ExecutionHistory> = None;
     let max_attempts = 3;
+    let config = load_config()?;
+    let ui_text = get_ui_text(&config.language);
 
     let mut attempt = 1;
     while attempt <= max_attempts {
-        term.write_line(&format!("{}", style("🤔 正在思考中...").blue()))?;
+        term.write_line(&format!("{}", style(ui_text.thinking).blue()))?;
         let command = get_ai_response(prompt.as_str(), history.as_ref(), cli.debug).await?;
 
         term.write_line("")?;
-        term.write_line(&format!("{}", style("📝 生成的命令：").blue().bold()))?;
+        term.write_line(&format!("{}", style(ui_text.generated_command).blue().bold()))?;
         term.write_line(&format!("{}", style(&command).cyan()))?;
         term.write_line("")?;
 
         if is_dangerous_command(&command) {
             term.write_line(&format!(
                 "{}",
-                style("⚠️  警告：检测到潜在的危险命令，拒绝执行！")
+                style(ui_text.dangerous_command_warning)
                     .red()
                     .bold()
             ))?;
@@ -338,12 +525,12 @@ async fn main() -> Result<()> {
 
         if !cli.dry_run {
             if Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt("是否要执行这个命令？")
+                .with_prompt(ui_text.execute_command_prompt)
                 .default(false)
                 .interact()?
             {
                 term.write_line("")?;
-                term.write_line(&format!("{}", style("🚀 正在执行命令...").yellow()))?;
+                term.write_line(&format!("{}", style(ui_text.executing_command).yellow()))?;
 
                 #[cfg(target_os = "windows")]
                 let output = Command::new("cmd")
@@ -366,51 +553,52 @@ async fn main() -> Result<()> {
                 };
 
                 if success {
-                    term.write_line(&format!("{}", style("✅ 命令执行成功！").green().bold()))?;
-                    if cli.verbose && !output_text.is_empty() {
-                        term.write_line("")?;
-                        term.write_line(&output_text)?;
-                    }
+                    term.write_line(&format!("{}", style(ui_text.command_success).green()))?;
                 } else {
-                    term.write_line(&format!(
-                        "{} {}",
-                        style("❌ 命令执行失败：").red().bold(),
-                        style(&output_text).red()
-                    ))?;
+                    term.write_line(&format!("{}", style(ui_text.command_failure).red()))?;
+                }
+
+                if !output_text.is_empty() {
+                    term.write_line("")?;
+                    term.write_line(&output_text)?;
+                }
+
+                if success {
+                    if !Confirm::with_theme(&ColorfulTheme::default())
+                        .with_prompt(ui_text.goal_achieved_prompt)
+                        .default(true)
+                        .interact()?
+                    {
+                        history = Some(ExecutionHistory {
+                            command,
+                            output: output_text,
+                            success,
+                            attempt,
+                        });
+                        attempt += 1;
+                        continue;
+                    }
+                    return Ok(());
                 }
 
                 history = Some(ExecutionHistory {
-                    command: command.clone(),
+                    command,
                     output: output_text,
                     success,
                     attempt,
                 });
-
-                if success {
-                    if Confirm::with_theme(&ColorfulTheme::default())
-                        .with_prompt("命令是否达到了预期目标？")
-                        .default(true)
-                        .interact()?
-                    {
-                        break;
-                    }
-                }
-            } else {
-                break;
+                attempt += 1;
+                continue;
             }
-        } else {
-            break;
+            return Ok(());
         }
 
-        attempt += 1;
-        if attempt > max_attempts {
-            term.write_line(&format!(
-                "{}",
-                style("⚠️  已达到最大尝试次数，程序终止。").yellow().bold()
-            ))?;
-        }
-        term.write_line("")?;
+        return Ok(());
     }
 
+    term.write_line(&format!(
+        "{}",
+        style(ui_text.max_attempts_reached).red().bold()
+    ))?;
     Ok(())
 }

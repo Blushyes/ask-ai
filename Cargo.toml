@@ -3,7 +3,7 @@ name = "ask-ai"
 version = "0.1.2"
 edition = "2021"
 description = "AI driven shell command helper"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["blushyes <Blushyes@gmail.com>"]
 
 [[bin]]
 name = "ask"
