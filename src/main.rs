@@ -186,7 +186,8 @@ struct UiText {
 const UI_TEXT_EN: UiText = UiText {
     thinking: "🤔 Thinking...",
     generated_command: "📝 Generated command:",
-    dangerous_command_warning: "⚠️  Warning: Potentially dangerous command detected, execution refused!",
+    dangerous_command_warning:
+        "⚠️  Warning: Potentially dangerous command detected, execution refused!",
     execute_command_prompt: "Do you want to execute this command?",
     executing_command: "🚀 Executing command...",
     command_success: "✅ Command executed successfully!",
@@ -225,15 +226,15 @@ const UI_TEXT_ZH: UiText = UiText {
 
 fn get_ui_text(language: &str) -> &'static UiText {
     match language {
-        "en" => &UI_TEXT_EN,
-        _ => &UI_TEXT_ZH,
+        "zh" => &UI_TEXT_ZH,
+        _ => &UI_TEXT_EN,
     }
 }
 
 fn get_prompt(language: &str) -> &'static str {
     match language {
-        "en" => PROMPT_EN,
-        _ => PROMPT_ZH,
+        "zh" => PROMPT_ZH,
+        _ => PROMPT_EN,
     }
 }
 
@@ -271,7 +272,7 @@ fn get_system_language() -> String {
         .or_else(|_| env::var("LC_ALL"))
         .or_else(|_| env::var("LANGUAGE"))
         .unwrap_or_else(|_| String::from("en_US.UTF-8"));
-    
+
     // Extract language code from format like "en_US.UTF-8"
     if lang.starts_with("zh") {
         "zh".to_string()
@@ -300,7 +301,7 @@ fn load_config() -> Result<Config> {
         let default_language = get_system_language();
         // Get UI text based on system language
         let ui_text = get_ui_text(&default_language);
-        
+
         println!("{}", style(ui_text.first_run_config).blue().bold());
         println!();
 
@@ -317,7 +318,7 @@ fn load_config() -> Result<Config> {
             .with_prompt(ui_text.model_prompt)
             .default(String::from("gpt-3.5-turbo"))
             .interact()?;
-            
+
         let language = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
             .with_prompt(ui_text.language_prompt)
             .default(default_language)
@@ -337,7 +338,7 @@ fn load_config() -> Result<Config> {
         return Ok(config);
     }
     let config_str = fs::read_to_string(&config_path).context("Unable to read config file")?;
-    
+
     // 尝试解析配置文件，如果失败可能是旧版本配置缺少language字段
     match toml::from_str::<Config>(&config_str) {
         Ok(config) => Ok(config),
@@ -347,30 +348,31 @@ fn load_config() -> Result<Config> {
             struct OldConfig {
                 api: ApiConfig,
             }
-            
-            let old_config: OldConfig = toml::from_str(&config_str).context("Unable to parse config file")?;
-            
+
+            let old_config: OldConfig =
+                toml::from_str(&config_str).context("Unable to parse config file")?;
+
             // 获取系统默认语言
             let default_language = get_system_language();
             // 获取对应语言的UI文本
             let ui_text = get_ui_text(&default_language);
-            
+
             // 提示用户选择语言
             println!("{}", style("需要设置语言偏好").blue().bold());
             let language = dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
                 .with_prompt(ui_text.language_prompt)
                 .default(default_language)
                 .interact()?;
-            
+
             // 创建新的配置并保存
             let config = Config {
                 api: old_config.api,
                 language,
             };
-            
+
             save_config(&config)?;
             println!("{}", style(ui_text.config_saved).green().bold());
-            
+
             Ok(config)
         }
     }
@@ -433,8 +435,12 @@ async fn get_ai_response(
     let model = &config.api.model;
 
     let system_info = get_system_info();
-    let full_prompt = format!("{}
-{}", get_prompt(&config.language), system_info);
+    let full_prompt = format!(
+        "{}
+{}",
+        get_prompt(&config.language),
+        system_info
+    );
     let user_prompt = match history {
         Some(h) => format!(
             "用户的问题为：{}
@@ -492,11 +498,17 @@ async fn get_ai_response(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if let Some(Commands::Set { config_type, config_value }) = cli.command {
+    if let Some(Commands::Set {
+        config_type,
+        config_value,
+    }) = cli.command
+    {
         return set_config(&config_type, &config_value);
     }
 
-    let prompt = cli.prompt.ok_or_else(|| anyhow::anyhow!("请提供操作描述"))?;
+    let prompt = cli
+        .prompt
+        .ok_or_else(|| anyhow::anyhow!("请提供操作描述"))?;
     let term = Term::stdout();
     let mut history: Option<ExecutionHistory> = None;
     let max_attempts = 3;
@@ -509,16 +521,17 @@ async fn main() -> Result<()> {
         let command = get_ai_response(prompt.as_str(), history.as_ref(), cli.debug).await?;
 
         term.write_line("")?;
-        term.write_line(&format!("{}", style(ui_text.generated_command).blue().bold()))?;
+        term.write_line(&format!(
+            "{}",
+            style(ui_text.generated_command).blue().bold()
+        ))?;
         term.write_line(&format!("{}", style(&command).cyan()))?;
         term.write_line("")?;
 
         if is_dangerous_command(&command) {
             term.write_line(&format!(
                 "{}",
-                style(ui_text.dangerous_command_warning)
-                    .red()
-                    .bold()
+                style(ui_text.dangerous_command_warning).red().bold()
             ))?;
             return Ok(());
         }

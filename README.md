@@ -44,6 +44,9 @@ ask set config api_key=your_api_key
 
 # Set model name
 ask set config model=gpt-3.5-turbo
+
+# Set interface language (en/zh)
+ask set config language=en
 ```
 
 The configuration file format is as follows:
@@ -53,6 +56,8 @@ The configuration file format is as follows:
 base_url = "Your OpenAI API URL"
 api_key = "Your OpenAI API Key"
 model = "Model name you want to use (e.g., gpt-3.5-turbo)"
+
+language = "Interface language (en/zh)"
 ```
 
 ## 🚀 Usage

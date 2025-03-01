@@ -42,6 +42,9 @@ ask set config api_key=your_api_key
 
 # 设置模型名称
 ask set config model=gpt-3.5-turbo
+
+# 设置界面语言 (en/zh)
+ask set config language=zh
 ```
 
 配置文件格式如下：
@@ -51,6 +54,8 @@ ask set config model=gpt-3.5-turbo
 base_url = "你的OpenAI API地址"
 api_key = "你的OpenAI API密钥"
 model = "你要使用的模型名称（如：gpt-3.5-turbo）"
+
+language = "界面语言 (en/zh)"
 ```
 
 ## 🚀 使用方法
